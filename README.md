@@ -108,11 +108,33 @@ In order to access the Lambda function from the internet, you'll need to use the
 
 ### Set up URL signing for the S3 bucket
 
-The Lambda function is going to store the generate PDF in the S3 bucket, and return a signed URL to the client.  The signed URL provides temporary access to the document.  To sign the URL, you'll need to do the following:
+The Lambda function is going to store the generated PDF in the S3 bucket, and return a signed URL to the client.  The signed URL provides temporary access to the document.  To sign the URL, you'll need to do the following:
 
-* Create another S3 bucket to store an RSA private key.
 * Create a cloudfront distribution as a frontend to the PDF S3 bucket, which is only accessible through signed URLs.
+* Get your cloudfront signing keys from your root AWS account.
+* Create another S3 bucket to store the cloudfront private key.
 
-TODO
+#### Create a cloudfront distribution for the PDF S3 bucket
+
+1.  Choose services from the main menu.  Search for CloudFront and open the CloudFront service.
+2.  Click the `Create Distribution` button.
+3.  Under the Web distribution option, click the `Get Started` button.
+4.  In the Origin Domain Name, choose the S3 Bucket, eg. "pdf-service-cache"
+5.  For the `Restrict Bucket Access` option, choose `Yes`.
+6.  For the `Origin Access Identity` option, choose `Create a New Identity`.
+7.  For the `Grant Read Permissions on Bucket` option, choose `Yes, Update Bucket Policy`.
+8.  Scroll down to the option `Restrict Viewer Access (Use Signed URLs or Signed Cookies)` and change it to `Yes`.
+9.  Leave all other options on their defaults, and click the `Create Distribution` button.
+
+#### Get your cloudfront signing keys from your root AWS account
+
+1.  You'll need to login to AWS using your root account, which is the only place the keys are available.
+2.  Click your name in the top menu and choose `My Security Credentials`.
+3.  Dismiss the popup window by clicking `Continue to Security Credentials`.
+4.  Open the `CloudFront key pairs` section.
+5.  Click the `Create New Keypair` button.  Download both the public and private keys and save them.
+6.  Your Lambda function will need to know the public key through an environment variable.  Return to the function and add an environment variable called `CLOUDFRONT_KEY_PAIR_ID`, setting the value to the public key you just downloaded.
+
+#### Create another S3 bucket to store the private key 
 
 TODO
