@@ -44,7 +44,7 @@ func SignS3ObjectUrl(objectKey string) string {
 		Key: aws.String(os.Getenv("CLOUDFRONT_PRIVATE_KEY_OBJECT_NAME")),
 	})
 	if err != nil {
-		log.Fatalf("Unable to download cloudfront private key from S3")
+		log.Fatalf("Unable to download cloudfront private key from S3: %v", err)
 	}
 	// get the object as a string
 	buffer := new(bytes.Buffer)

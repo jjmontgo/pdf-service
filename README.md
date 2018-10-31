@@ -113,6 +113,7 @@ The Lambda function is going to store the generated PDF in the S3 bucket, and re
 * Create a cloudfront distribution as a frontend to the PDF S3 bucket, which is only accessible through signed URLs.
 * Get your cloudfront signing keys from your root AWS account.
 * Create another S3 bucket to store the cloudfront private key.
+* Give the Lambda function access to the S3 bucket with the private key.
 
 #### Create a cloudfront distribution for the PDF S3 bucket
 
@@ -125,6 +126,7 @@ The Lambda function is going to store the generated PDF in the S3 bucket, and re
 7.  For the `Grant Read Permissions on Bucket` option, choose `Yes, Update Bucket Policy`.
 8.  Scroll down to the option `Restrict Viewer Access (Use Signed URLs or Signed Cookies)` and change it to `Yes`.
 9.  Leave all other options on their defaults, and click the `Create Distribution` button.
+10.  Add the URL of the distribution to your Lambda function with an environment variable called `CLOUDFRONT_PRIVATE_URL`.  The URL is listed under the `Domain Name` column of the cloudfront distribution list.  It uses the format <distributionid>.cloudfront.net.
 
 #### Get your cloudfront signing keys from your root AWS account
 
@@ -135,6 +137,72 @@ The Lambda function is going to store the generated PDF in the S3 bucket, and re
 5.  Click the `Create New Keypair` button.  Download both the public and private keys and save them.
 6.  Your Lambda function will need to know the public key through an environment variable.  Return to the function and add an environment variable called `CLOUDFRONT_KEY_PAIR_ID`, setting the value to the public key you just downloaded.
 
-#### Create another S3 bucket to store the private key 
+#### Create another S3 bucket to store the private key
 
-TODO
+I never keep secret data in version control.  [AWS Secrets Manager](https://aws.amazon.com/secrets-manager/) might have been a good place for storing keys, but I don't want to pay $0.40 per secret per month.  So I decided to keep the cloudfront private key in a second S3 bucket and fetch it from the Lambda function.
+
+1.  Create a second S3 bucket and name it something appropriate, like "app-private-keys".  Leave all the settings default so the bucket isn't accessible by anyone.
+2.  Upload the private key you downloaded in the previous section in the new bucket.  Name it something like "cloudfront-private-key.pem".
+3.  Add a new environment variable to the Lambda function called `APP_KEYS_BUCKET_NAME` with the name of the bucket.
+4.  Add another environment variable to the Lambda fucntion called `CLOUDFRONT_PRIVATE_KEY_OBJECT_NAME` and set it to the key name in the bucket, "cloudfront-private-key.pem".  Remember to click `Save`.
+3.  Now you'll need to give your Lambda function access to the private key.  You can do this by adding a permission policy to the function's role that gives it access to both the bucket and the key in the bucket.
+
+#### Give the Lambda function access to the S3 bucket with the private key.
+
+1.  Click the row representing your new private keys bucket.  Click the `Copy Bucket ARN` button in the panel that slides in from the right.
+2.  Under Services, choose IAM again.
+3.  Click `Roles` in the left-hand menu.
+4.  Open the Lambda function's role (`pdf-service-role`).
+5.  Click the `Attach policies` button.
+6.  Click the `Create policy` button.
+7.  Under Service, choose S3.
+8.  Under Actions, check the `Read` access level.
+9.  Under Resources, you will first add the bucket ARN you copied earlier.  You will also need to provide the Object.  Click `Add ARN` and paste the bucket ARN again beside `Bucket Name`.  Then enter the object name for your private key, eg. cloudfront-private-key.pem.  Click the `Add` button.
+10.  Click the `Review policy` button.
+11.  Enter a good name for the policy, such as `access-cloudfront-private-key`.
+12.  Click the `Create Policy` button.
+13.  Return to the Lambda function role in the previous tab.  
+14.  Click the `Filter policies` link and choose `Customer managed`.
+15.  Click the Refresh button in the top right-hand corner so that the new policy you created shows up in the list.
+16.  Check the new policy and click the `Attach policy` button.
+
+#### Create an IAM user that will have access to the API Gateway through signed URLs.
+
+To create signed URLs for a cloudfront distribution, you use cloudfront keys.  But to create signed URLs to access Amazon resources such as API Gateway, you need to create an IAM user with API keys.
+
+1.  Choose services from the main menu.  Search for IAM and open the IAM Management Console.
+2.  Click `Users` in the left hand menu.
+3.  Click the `Add user` button.
+4.  Give the user the user name `pdf-service`.  Under "Access Type", select `Programmatic Access`.  Click `Next`.
+5.  Under "Set Permissions," choose `Attach existing policies directly`.  Click the `Create Policy` button.
+6.  Beside "Service," click `Choose a service`.  Search for `ExecuteAPI` and select it.
+7.  Under "Access level," check the box for `All ExecuteAPI actions (execute-api:*)`.
+8.  Click the `Resources` section and choose `Add ARN`. Unfortunately, this part is a little difficult and will require you to open the AWS console in a separate tab to get the following information.
+8.1.  Enter the `Region` your API is in using the right [code](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-regions-availability-zones.html#concepts-available-regions).
+8.2.  Enter your `Account` number.  To get this number, click the drop-down menu item of your name in the main menu, and click `My Account`.  Your Account number is under "Account Settings" and beside "Account Id".
+8.3.  Enter the `Api id`.  Return to your API Gateway and you'll see your Api id in the breadcrumb menu at the end.  eg. APIs > PDF Service (`Api Id is here`).
+8.4.  For the `Stage`, enter * for Any stage.
+8.5.  For the method, enter `POST`.
+9.  Click `Review Policy`.  Enter the name `pdf-service-api-gateway` and click `Create policy`.
+10.  Return to the user you were creating in step 4, and add the new policy you created to the user.  You may need to click the Refresh button for the policy to appear in the list.
+11.  Click the `Create user` button.
+12.  You should now see the "Access key ID" and "Secret access key" for the new user.  Record both of these values.
+
+#### Make the API Gateway only accessible through your IAM user
+
+1.  Choose services from the main menu.  Search for "API Gateway" and open the gateway you set up earlier.
+2.  Open the POST method by clicking on `POST`.
+3.  Click the `Method Request` link.
+4.  Under Settings, beside Authorization, click the edit pencil icon.
+5.  Choose `AWS_IAM` and click the checkmark.
+
+#### Generate a signed URL to the AWS Gateway and pass the HTML to be rendered
+
+To retrieve a URL to a rendered PDF, you'll need to do the following in your client code:
+
+1.  Generate an authorization header using your IAM user's public and private API keys:
+https://docs.aws.amazon.com/apigateway/api-reference/signing-requests/
+2.  POST the HTML to the API Gateway as query parameters in the body of the request, with the authorization header.
+3.  The service will return a URL to the generated PDF document.  You can redirect the user to this URL, or anything else you like.
+
+You'll need to implement this in your language of choice.  In my case, the client language was PHP.  So I've included a class that implements the process with [this gist](https://gist.github.com/jjmontgo/2be75d3fb36d680563a6d7d40931d13d).
